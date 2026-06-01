@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G-BOT | Tư vấn PC GearVN</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="brand">
+                <i class="fa-solid fa-desktop brand-icon"></i>
+                <div>
+                    <h2>G-BOT GearVN</h2>
+                    <span class="brand-sub">Tư vấn PC thông minh</span>
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <h3><i class="fa-solid fa-sliders"></i> Chế độ hoạt động</h3>
+                <div class="mode-toggle-container">
+                    <button class="mode-btn" id="mode-chatbot" onclick="setMode('chatbot')">
+                        <i class="fa-solid fa-comments"></i> Chatbot
+                    </button>
+                    <button class="mode-btn active" id="mode-agent" onclick="setMode('agent')">
+                        <i class="fa-solid fa-robot"></i> ReAct Agent
+                    </button>
+                </div>
+                <div class="mode-info" id="mode-description">
+                    Chế độ ReAct Agent — tra cứu cấu hình game trên Steam và sản phẩm thực tế trên GearVN.
+                </div>
+            </div>
+
+            <div class="panel-section features-panel">
+                <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Tính năng</h3>
+                <ul class="feature-list">
+                    <li><i class="fa-brands fa-steam"></i> Crawl cấu hình từ link Steam</li>
+                    <li><i class="fa-solid fa-gamepad"></i> Tư vấn theo tên game</li>
+                    <li><i class="fa-solid fa-wallet"></i> Gợi ý PC theo ngân sách</li>
+                    <li><i class="fa-solid fa-link"></i> Link sản phẩm GearVN</li>
+                </ul>
+            </div>
+
+            <div class="panel-section telemetry-panel">
+                <h3><i class="fa-solid fa-chart-line"></i> Bảng đo lường</h3>
+                
+                <div class="metric-card">
+                    <div class="metric-header">
+                        <span>Độ trễ phản hồi</span>
+                        <i class="fa-solid fa-gauge-high text-blue"></i>
+                    </div>
+                    <div class="metric-value" id="metric-latency">0 <span class="unit">ms</span></div>
+                    <div class="metric-footer">Tổng thời gian xử lý yêu cầu</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-header">
+                        <span>Token sử dụng</span>
+                        <i class="fa-solid fa-coins text-emerald"></i>
+                    </div>
+                    <div class="metric-value" id="metric-tokens">0</div>
+                    <div class="metric-details">
+                        <div>Đầu vào: <span id="prompt-tokens">0</span></div>
+                        <div>Đầu ra: <span id="completion-tokens">0</span></div>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-header">
+                        <span>Chi phí ước tính</span>
+                        <i class="fa-solid fa-dollar-sign text-amber"></i>
+                    </div>
+                    <div class="metric-value" id="metric-cost">$0.0000</div>
+                    <div class="metric-footer">Mô phỏng: $0.01 / 1K tokens</div>
+                </div>
+            </div>
+            
+            <div class="sidebar-footer">
+                <a href="https://gearvn.com/" target="_blank" rel="noopener" class="gearvn-link">
+                    <i class="fa-solid fa-external-link"></i> gearvn.com
+                </a>
+            </div>
+        </aside>
+
+        <main class="chat-area">
+            <header class="chat-header">
+                <div class="header-title">
+                    <h1 id="chat-title">G-BOT Tư Vấn PC</h1>
+                    <p class="status-indicator"><span class="dot"></span> Trực tuyến</p>
+                </div>
+                <div class="system-status">
+                    <span class="badge" id="badge-provider">Đang tải...</span>
+                </div>
+            </header>
+
+            <div class="messages-container" id="chat-messages">
+                <div class="message assistant">
+                    <div class="avatar"><i class="fa-solid fa-robot"></i></div>
+                    <div class="message-content">
+                        <p>Xin chào! Mình là <strong>G-BOT</strong> — trợ lý tư vấn PC của <a href="https://gearvn.com/" target="_blank" rel="noopener">GearVN</a>.</p>
+                        <p style="margin-top: 8px;">Bạn có thể:</p>
+                        <ul style="margin: 8px 0 0 18px; line-height: 1.7;">
+                            <li>Gửi <strong>link Steam</strong> game để mình tra cấu hình yêu cầu</li>
+                            <li>Nêu <strong>tên game</strong> muốn chơi (VD: Elden Ring, Cyberpunk 2077)</li>
+                            <li>Cho biết <strong>ngân sách</strong> (VD: 30 triệu, 50 triệu) để gợi ý PC phù hợp</li>
+                        </ul>
+                        <p style="margin-top: 10px; opacity: 0.85;">💡 Bật chế độ <strong>ReAct Agent</strong> để mình tra giá và link sản phẩm thực tế từ GearVN nhé!</p>
+                        <p style="margin-top: 8px; opacity: 0.7; font-size: 13px;">Mình chỉ tư vấn <strong>build PC chơi game</strong> — không hỗ trợ chủ đề khác.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="suggestions-container" id="suggestions">
+                <p class="suggestions-label">Gợi ý câu hỏi:</p>
+                <div class="suggestions-grid">
+                    <button class="suggestion-chip" onclick="useSuggestion('Tôi có ngân sách 30 triệu, muốn build PC chơi Counter-Strike 2. Tư vấn giúp tôi.')">
+                        PC 30 triệu chơi CS2
+                    </button>
+                    <button class="suggestion-chip" onclick="useSuggestion('https://store.steampowered.com/app/1245620/ELDEN_RING/')">
+                        Link Steam Elden Ring
+                    </button>
+                    <button class="suggestion-chip" onclick="useSuggestion('Ngân sách 50 triệu, tư vấn PC gaming chơi AAA mượt 1440p trên GearVN.')">
+                        PC 50 triệu chơi AAA
+                    </button>
+                    <button class="suggestion-chip" onclick="useSuggestion('Tôi muốn chơi Cyberpunk 2077, cần cấu hình gì và mua linh kiện nào trên GearVN?')">
+                        Cấu hình Cyberpunk 2077
+                    </button>
+                </div>
+            </div>
+
+            <footer class="chat-input-container">
+                <form id="chat-form" onsubmit="sendMessage(event)">
+                    <input type="text" id="user-input" placeholder="Nhập yêu cầu, tên game, ngân sách hoặc link Steam..." autocomplete="off" required>
+                    <button type="submit" class="send-btn" id="send-button">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+            </footer>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

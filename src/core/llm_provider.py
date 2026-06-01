@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional, Generator
 class LLMProvider(ABC):
     """
     Abstract Base Class for LLM Providers.
-    Supports OpenAI, Gemini, and Local models.
+    Supports MiMo, OpenAI, Gemini, and Local models.
     """
 
     def __init__(self, model_name: str, api_key: Optional[str] = None):
