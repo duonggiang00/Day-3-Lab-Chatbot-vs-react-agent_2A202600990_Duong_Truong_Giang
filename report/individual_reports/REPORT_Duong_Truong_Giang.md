@@ -8,155 +8,139 @@
 
 ## I. Technical Contribution (15 Points)
 
-Dự án được refactor từ demo e-commerce sang **G-BOT** — trợ lý tư vấn PC chơi game cho [GearVN](https://gearvn.com/), hỗ trợ cả chế độ **Chatbot** (LLM trực tiếp) và **ReAct Agent** (Thought → Action → Observation).
+### Sản phẩm làm được gì?
 
-### Modules Implemented
+Em xây **G-BOT** — chatbot tư vấn PC chơi game trên website GearVN. Khách có thể:
 
-| Module | Vai trò |
+- Gửi **link Steam** của game → bot đọc cấu hình tối thiểu / khuyến nghị.
+- Nói **ngân sách** (ví dụ: *30 triệu*) → bot gợi ý PC có sẵn trên GearVN kèm **giá và link mua thật**.
+- Hỏi **tên game + ngân sách** → bot so sánh “game cần gì” với “máy nào trong tầm tiền”.
+- Chỉ hỏi linh kiện (VGA, RAM…) → bot tìm sản phẩm phù hợp trên shop.
+
+Giao diện tiếng Việt, có hai chế độ: **Chatbot** (trả lời nhanh, một lần) và **ReAct Agent** (suy nghĩ từng bước, gọi “công cụ” lấy dữ liệu thật rồi mới tư vấn).
+
+### Em đóng góp cụ thể
+
+| Phần việc | Ý nghĩa thực tế |
 | :--- | :--- |
-| `src/tools/gearvn_tools.py` | Crawl cấu hình Steam, tìm sản phẩm/PC qua Shopify JSON API GearVN, sanitize link |
-| `src/guardrails/topic_guard.py` | Guardrail phạm vi (PC gaming), nhận diện link Steam/ngân sách |
-| `src/agent/agent.py` | ReAct loop tiếng Việt, prompt tư vấn PC, quy tắc không bịa link |
-| `src/server.py` | FastAPI `/api/chat`, routing chatbot/agent, fast-path crawl Steam |
-| `src/core/provider_factory.py`, `openai_provider.py` | Tích hợp MiMo API (`tp-*` + Token Plan SGP) |
-| `src/static/` (`index.html`, `app.js`, `style.css`) | UI G-BOT tiếng Việt, hiển thị reasoning steps |
+| Lấy cấu hình từ Steam | Khách không cần tự mở trang Steam, copy CPU/RAM/VGA |
+| Gắn catalog GearVN | Giá và link sản phẩm lấy từ shop, không “đoán” |
+| Quy tắc phạm vi (guardrail) | Bot từ chối lịch sự câu ngoài PC gaming (thời tiết, làm bài…) |
+| Hỏi ngân sách khi thiếu | Tránh gợi ý PC sai tầm giá |
+| Giao diện web đơn giản | Khách chat như Zalo/Messenger, xem được bot đang “nghĩ” bước nào |
 
-### Code Highlights
+### Luồng tư vấn (dễ hình dung)
 
-**1. Crawl cấu hình Steam** — parse `.game_area_sys_req` từ trang Store:
+1. Khách nhắn tin → hệ thống kiểm tra có đúng chủ đề PC/game không.
+2. Nếu chỉ gửi link Steam → bot **đọc cấu hình game ngay** (không cần AI), rồi hỏi ngân sách.
+3. Nếu đã có game + ngân sách → **Agent** lần lượt: tra game → tìm PC trên GearVN → tổng hợp lời khuyên.
+4. Câu trả lời cuối chỉ dùng link sản phẩm đã lấy từ shop (hạn chế link sai / 404).
 
-```242:283:src/tools/gearvn_tools.py
-def crawl_steam_requirements(steam_url: str) -> str:
-    """
-    Crawl cấu hình tối thiểu/khuyến nghị từ trang Steam Store.
-    """
-    # ... fetch HTML, parse minimum/recommended specs ...
-    return json.dumps(
-        {
-            "game_name": game_name,
-            "steam_url": url,
-            "minimum": specs["minimum"],
-            "recommended": specs["recommended"] or specs["minimum"],
-        },
-        ensure_ascii=False,
-    )
-```
+### Công cụ agent hỗ trợ (bản đơn giản)
 
-**2. Fast-path trên server** — link Steam thuần crawl không cần LLM (tránh 429 MiMo):
-
-```98:118:src/server.py
-    if is_primarily_steam_link(user_message):
-        steam_url = extract_steam_store_url(user_message) or user_message
-        t0 = time.time()
-        crawled = crawl_steam_requirements(steam_url)
-        # ... trả về format_steam_crawl_reply + step crawl_steam_requirements
-```
-
-**3. ReAct prompt** — buộc agent gọi tool trước khi `Final Answer`, không bịa URL GearVN:
-
-```54:63:src/agent/agent.py
-Bạn PHẢI tuân thủ quy trình ReAct. KHÔNG trả lời cuối cùng nếu chưa gọi công cụ lấy dữ liệu thực.
-QUY TẮC LINK (BẮT BUỘC):
-- CHỈ được dùng trường "link" từ JSON Observation do hệ thống trả về.
-- TUYỆT ĐỐI KHÔNG tự bịa URL, handle, tên sản phẩm hoặc giá.
-```
-
-### Documentation — Tương tác với ReAct loop
-
-1. **User** gửi tin nhắn → `server.py` chạy `topic_guard` (on-topic, hỏi ngân sách, hoặc fast-path Steam).
-2. **ReActAgent.run()** gọi LLM với system prompt + lịch sử `Thought/Action/Observation`.
-3. Parser trích `Action: tool_name(args)` → thực thi hàm trong `GEARVN_TOOLS` → **Observation** (JSON) append vào prompt vòng sau.
-4. Khi LLM xuất `Final Answer:` → `sanitize_gearvn_links()` loại link sai / dấu câu thừa → trả UI.
-
-**Inventory công cụ agent:**
-
-| Tool | Input | Use case |
-| :--- | :--- | :--- |
-| `crawl_steam_requirements` | URL Steam | Lấy cấu hình tối thiểu/khuyến nghị |
-| `lookup_game_requirements` | Tên game | Tìm game trên Steam search rồi crawl |
-| `get_gearvn_pc_by_budget` | `budget_vnd` (số) | PC có sẵn theo collection ngân sách GearVN |
-| `search_gearvn_products` | query, max_price | Tìm linh kiện theo từ khóa |
-| `search_gearvn_by_category` | category, max_price | VGA/CPU/RAM/... |
-| `get_gearvn_product_detail` | URL sản phẩm | Chi tiết một SKU |
-
-**LLM:** Primary **MiMo** (`mimo-v2.5-pro`, key `tp-*`, base URL Token Plan SGP). Đã thử **Gemini** nhưng gặp quota 429 free tier.
+| Công cụ | Khách hưởng lợi gì |
+| :--- | :--- |
+| Đọc link Steam | Biết game nặng hay nhẹ, cần RAM/VGA thế nào |
+| Tìm theo tên game | Không bắt buộc phải có link |
+| PC theo ngân sách | 2–3 bộ máy có sẵn, đúng túi tiền |
+| Tìm linh kiện | Tự ráp hoặc nâng cấp từng phần |
 
 ---
 
 ## II. Debugging Case Study (10 Points)
 
-### Case 1: Mọi tin nhắn đều trả guardrail “G-BOT chỉ hỗ trợ…” (kể cả link Steam)
+### Case 1: Gửi link Steam mà bot vẫn “từ chối”
 
-- **Problem Description**: Gửi `https://store.steampowered.com/app/513710/SCUM/` luôn nhận câu từ chối cố định, `steps: []`, `total_tokens: 0` — không crawl Steam, không gọi agent.
-- **Log Source**: Response API có `latency_ms: 0`, không có `AGENT_START` / `LLM_RESPONSE` cho request đó; guard logic local (`is_on_topic` → `True`) nhưng API vẫn off-topic.
-- **Diagnosis**: Trong `server.py`, decorator `@app.post("/api/chat")` gắn nhầm vào `_off_topic_payload()` thay vì `chat_endpoint()`. Mọi POST `/api/chat` chỉ trả `off_topic_response()` — **lỗi routing FastAPI**, không phải model hay prompt.
-- **Solution**: Chuyển `@app.post("/api/chat")` sang `async def chat_endpoint(...)`. Thêm `is_primarily_steam_link()` để crawl Steam trực tiếp khi user chỉ gửi URL.
+- **Triệu chứng**: Khách dán link SCUM, bot trả lời cố định: *“Mình chỉ hỗ trợ build PC…”* — trong khi chính bot cũng ghi là hỗ trợ link Steam.
+- **Cảm nhận người dùng**: Bot “không hiểu” hoặc “hỏng”, mất niềm tin ngay lượt đầu.
+- **Nguyên nhân (đã tìm ra)**: Lỗi cấu hình server — mọi tin nhắn đều đi vào hàm trả lời từ chối, **không** vào logic chat thật. Không phải do AI “ngu”.
+- **Cách xử lý**: Sửa đúng điểm nhận tin nhắn API; thêm luồng: **chỉ link Steam** thì đọc cấu hình trước, hỏi ngân sách sau.
+- **Bài học**: Nên test bằng **một link Steam đơn giản** sau mỗi lần deploy; nếu trả lời giống hệt mọi câu → nghi lỗi hệ thống trước, nghi AI sau.
 
-### Case 2: Agent chậm / lỗi 429 MiMo sau khi sửa routing
+### Case 2: Bot báo “quá nhiều request” (429)
 
-- **Problem Description**: Sau khi route đúng, agent chạy nhưng đôi lúc HTTP 429: `Too many requests`.
-- **Log Source** (`logs/2026-06-01.log`):
+- **Triệu chứng**: Sau vài lần thử, bot báo giới hạn API MiMo.
+- **Cảm nhận người dùng**: Chờ lâu hoặc không dùng được dù câu hỏi hợp lệ.
+- **Nguyên nhân**: Gói API có giới hạn số lần gọi/phút; test nhiều + Agent gọi AI nhiều vòng làm hết quota nhanh.
+- **Cách xử lý**: Link Steam chỉ crawl (miễn phí hơn); thông báo lỗi rõ “đợi vài phút”; hạn chế bấm gửi liên tục khi demo.
+- **Bài học**: Tính năng **không cần AI** (đọc Steam) nên tách riêng — vẫn có giá trị khi AI tạm lỗi.
 
-```json
-{"timestamp": "2026-06-01T10:22:09.903289", "event": "AGENT_START", "data": {"input": "https://store.steampowered.com/app/513710/SCUM/", "model": "mimo-v2.5-pro"}}
-```
+### Case 3: Hỏi “Counter-Strike 2” nhưng bot bỏ qua cấu hình game
 
-(kèm exception 429 khi gọi `provider.generate` trong test trực tiếp `chat_endpoint`)
-
-- **Diagnosis**: Key MiMo Token Plan bị **rate limit** do test lặp nhiều lần; bước agent luôn cần LLM.
-- **Solution**: Fast-path `crawl_steam_requirements` không qua LLM; xử lý 429 rõ ràng trong `server.py`; khuyên user đợi hoặc chỉ gửi link Steam.
-
-### Case 3: `lookup_game_requirements("Counter-Strike 2")` thất bại → agent bỏ qua cấu hình Steam
-
-- **Log Source**:
-
-```json
-{"event": "LLM_RESPONSE", "data": {"text": "Thought: Công cụ lookup không tìm thấy \"Counter-Strike 2\"... Action: get_gearvn_pc_by_budget(30000000)"}}
-```
-
-- **Diagnosis**: Tên game trên Steam search không khớp chuỗi tìm kiếm; agent chuyển sang PC theo ngân sách mà **không** gọi `crawl_steam_requirements` (dù CS2 có app id 730).
-- **Solution**: Cập nhật prompt: nếu `lookup` fail → thử `crawl_steam_requirements` với URL Steam chuẩn (`/app/730/`). Log cho thấy lần chạy sau agent đã dùng đúng chuỗi: `lookup` → `crawl_steam` → `get_gearvn_pc_by_budget` (3 steps, thành công).
+- **Triệu chứng**: Bot nhảy thẳng sang gợi ý PC 30 triệu, ít nhắc cấu hình CS2.
+- **Nguyên nhân**: Tên game trên Steam đôi khi khó khớp (CS2 / Counter-Strike 2); bot chọn đường tắt “tìm PC theo tiền”.
+- **Cách xử lý**: Dạy bot trong prompt: tìm tên không được → thử link Steam chuẩn (app 730). Lần chạy sau: tra game → đọc Steam → mới gợi ý PC — kết quả đầy đủ hơn.
+- **Bài học**: Cần **vài câu mẫu** tên game khó (CS2, PUBG…) để kiểm tra trước khi giao cho khách.
 
 ---
 
 ## III. Personal Insights: Chatbot vs ReAct (10 Points)
 
-### 1. Reasoning — Vai trò khối `Thought`
+### 1. Reasoning — “Suy nghĩ” có giúp khách không?
 
-Với **Chatbot**, model trả lời một lần dựa trên kiến thức nội tại → dễ **bịa giá/link** GearVN hoặc cấu hình game lỗi thời.
+**Chatbot** giống nhân viên trả lời ngay một lần — nhanh nhưng dễ **đoán giá, đoán link** nếu không tra kho.
 
-Với **ReAct Agent**, khối `Thought` buộc model **lập kế hoạch từng bước** (ví dụ: “tra CS2 trước → so sánh với ngân sách 30 triệu → gọi `get_gearvn_pc_by_budget`”). Log `2026-06-01T09:41:21` cho thấy một response chứa cả chuỗi Thought/Action/Observation hợp lệ trước `Final Answer` có bảng so sánh PC thật từ JSON tool.
+**ReAct Agent** giống nhân viên nói: *“Để em xem cấu hình game trước… em tìm PC trong tầm 30 triệu…”* — khách thấy từng bước trên màn hình, dễ tin hơn khi cuối cùng có bảng so sánh 2–3 PC với giá GearVN.
 
-`Thought` giúp **debug** (đọc log biết agent định làm gì) và **giảm nhảy cóc** sang câu trả lời cuối khi chưa có dữ liệu.
+**Ý tưởng thực tế**: Trên shop, nên hiển thị 2–3 dòng “Đang kiểm tra game… Đang lọc PC theo ngân sách…” thay vì chỉ hiện loading chung — giảm cảm giác bot “bịa”.
 
-### 2. Reliability — Khi nào Agent kém hơn Chatbot?
+### 2. Reliability — Khi nào nên dùng mode nào?
 
-| Tình huống | Chatbot | Agent |
+| Tình huống khách | Nên dùng | Vì sao |
 | :--- | :--- | :--- |
-| Câu hỏi đơn giản (“CS2 cần RAM bao nhiêu?”) | Nhanh, đủ dùng | Chậm hơn (2–4 lần gọi LLM + HTTP tool) |
-| Rate limit API (429) | Một lần fail | Fail sau vài step, tốn token hơn |
-| Tool/search lỗi tên game | Có thể đoán đúng từ training | Có thể **bỏ qua** bước crawl, chỉ dùng `get_gearvn_pc_by_budget` |
-| Chỉ cần crawl Steam | Không có tool | Agent overkill; **server fast-path** tốt hơn cả hai |
+| “CS2 cần RAM bao nhiêu?” | Chatbot | Một câu, không cần tra shop |
+| “30 triệu chơi Elden Ring, gợi ý PC GearVN” | Agent | Cần game + giá + link thật |
+| Chỉ gửi link Steam | Đọc Steam trực tiếp | Nhanh, không tốn AI |
+| Khách gõ liên tục khi demo | Chatbot hoặc tắt Agent | Agent chậm và tốn quota |
 
-Agent **tốt hơn** khi cần **đa bước có dữ liệu thật**: Steam + ngân sách + link sản phẩm (ví dụ Cyberpunk: `crawl_steam` → nhiều `search_gearvn_products` → bảng linh kiện ~20 triệu trong log `09:49:12`).
+**Khi Agent tệ hơn Chatbot**: Câu ngắn, khẩn cấp; mạng/API chậm; khách chỉ cần ý tưởng sơ bộ, chưa cần mua ngay.
 
-### 3. Observation — Ảnh hưởng đến bước tiếp theo
+**Khi Agent tốt hơn rõ rệt**: Cần **nhiều nguồn** (Steam + catalog + ngân sách) trong một câu trả lời — ví dụ Cyberpunk: cấu hình game + bảng linh kiện ~20 triệu + link từng món.
 
-Observation (JSON từ GearVN/Steam) là **ground truth** cho vòng LLM sau:
+### 3. Observation — Phản hồi từ “thế giới thật”
 
-- Sau `crawl_steam_requirements`, agent thấy RAM/GPU thật → chọn `get_gearvn_pc_by_budget` hoặc `search_gearvn_by_category("vga", ...)`.
-- Khi Observation báo lỗi lookup CS2, agent (đôi khi) chuyển strategy — log cho thấy lần thành công dùng thêm `crawl_steam` app 730.
-- Prompt “chỉ dùng link từ Observation” kết hợp `sanitize_gearvn_links` giảm link 404 do model tự ghép handle sai.
+Mỗi bước agent nhận **kết quả thật** (giá PC, cấu hình Steam), không chỉ “trí nhớ” AI:
+
+- Biết game cần 16GB RAM → không gợi ý PC 8GB.
+- Biết shop có PC 28,9 triệu → không nói 25 triệu bừa.
+- Tìm game lỗi → đổi cách tra (link Steam) thay vì bịa.
+
+**Ý tưởng thực tế cho GearVN**: Cuối mỗi tư vấn, thêm nút *“Xem PC đề xuất”* / *“Chat với nhân viên”* — bot mở đường, người chốt đơn.
 
 ---
 
 ## IV. Future Improvements (5 Points)
 
-- **Scalability**: Hàng đợi async cho tool (Steam crawl + GearVN API); cache Shopify `products.json` theo TTL; tách worker crawl khỏi API FastAPI.
-- **Safety**: Supervisor LLM kiểm tra `Action` trước khi execute; giới hạn `max_steps` theo chi phí; validate tham số tool (budget > 0, URL whitelist `steampowered.com` / `gearvn.com`).
-- **Performance**: Embedding + vector DB khi số tool > 10; giữ fast-path deterministic cho Steam-only; retry/backoff khi MiMo 429; fallback provider (OpenAI/Gemini) có circuit breaker.
-- **Reliability**: Khi `lookup_game_requirements` fail → auto-retry với alias (CS2 → app 730); verify link GearVN bất đồng bộ thay vì tin LLM 100%.
-- **UX**: Session memory (game + budget đã hỏi); hiển thị rõ “đang crawl Steam” vs “đang gọi AI” trên UI.
+*Hướng cải thiện gắn với trải nghiệm khách và vận hành shop — không đi sâu stack kỹ thuật.*
+
+### Trải nghiệm khách hàng
+
+- **Nhớ cuộc chat ngắn**: Khách đã gửi link SCUM + 30 triệu thì lượt sau không hỏi lại từ đầu.
+- **Gợi ý câu mẫu** trên UI: *“PC 25–30 triệu chơi Valorant”*, *“Gửi link Steam game”*.
+- **So sánh 2 PC cạnh nhau** (giá, VGA, “dư / thiếu so với game”) — dễ quyết định hơn đoạn văn dài.
+
+### Niềm tin & an toàn
+
+- Chỉ link **gearvn.com** và **steampowered.com**; cảnh báo nếu bot sắp trả lời ngoài phạm vi PC.
+- Ghi chú *“Giá cập nhật lúc …, vui lòng kiểm tra trên web”* — tránh khiếu nại sai giá.
+
+### Vận hành & chi phí
+
+- Giờ cao điểm: ưu tiên câu có link Steam (ít tốn AI).
+- Giới hạn số lượt chat/phút mỗi IP khi demo công khai.
+- Báo cáo đơn giản cho team: *hôm nay bao nhiêu % câu có ngân sách, game nào được hỏi nhiều*.
+
+### Mở rộng sản phẩm (ý tưởng kinh doanh)
+
+- Gợi ý thêm **màn hình 144Hz** khi khách build PC esports (CS2, Valorant).
+- Combo **PC + màn hình + tai nghe** trong cùng ngân sách.
+- Tích hợp **khuyến mãi / trả góp** từ GearVN vào câu trả lời (nếu API shop có).
+
+### Đo lường thành công
+
+- Khách có **click link sản phẩm** sau tư vấn không?
+- Tỷ lệ câu trả lời có **đủ: game + ngân sách + ≥1 link**?
+- Khảo sát 1 câu sau chat: *“Bot có giúp bạn chọn được PC không?”* (có / chưa / cần nhân viên)
 
 ---
 
